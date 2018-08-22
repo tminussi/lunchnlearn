@@ -2,17 +2,12 @@ package com.leapest.lunchnlearn.service;
 
 import com.leapest.lunchnlearn.dto.MovieDto;
 import com.leapest.lunchnlearn.exception.MovieAlreadyExistsException;
-import com.leapest.lunchnlearn.exception.MovieException;
-import com.leapest.lunchnlearn.model.Movie;
+import com.leapest.lunchnlearn.exception.MovieNotFoundException;
 import com.leapest.lunchnlearn.repository.MovieRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
-import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Service
 public class MovieService {
@@ -26,21 +21,25 @@ public class MovieService {
 
     public Flux<MovieDto> findAll() {
         return this.movieRepository.findAll()
+                .take(2)
+                .flatMap(movie -> Flux.just(MovieDto.fromEntity(movie)))
                 .doOnEach(System.out::println)
-                .doOnComplete(() -> System.out.println("Stream is over"))
-                .filter(movie -> movie.getTitle().contains("2"))
-                .map(MovieDto::fromEntity);
+                .doOnComplete(() -> System.out.println("Stream is over"));
     }
 
     public Mono<MovieDto> findById(String id) {
         return this.movieRepository.findById(id)
-                .map(MovieDto::fromEntity);
+                .map(MovieDto::fromEntity)
+                .switchIfEmpty(Mono.error(new MovieNotFoundException("The given movie does not exist")));
     }
 
-    public Mono<Movie> save(MovieDto movieDto) {
+    public Mono<MovieDto> save(MovieDto movieDto) {
         return this.movieRepository.findOneByTitle(movieDto.getTitle())
                 .flatMap(movie -> Mono.error(new MovieAlreadyExistsException("The movie with this title already exists. Please choose another one")))
-                .then(movieRepository.save(MovieDto.toEntity(movieDto)));
+                .then(movieRepository.save(MovieDto.toEntity(movieDto)))
+                .map(MovieDto::fromEntity)
+                .doOnError(e -> System.out.println(e.getMessage()))
+                .doFinally(System.out::println);
     }
 
     public Mono<MovieDto> update(String id, MovieDto movieDto) {
@@ -51,19 +50,7 @@ public class MovieService {
                     movie.setTitle(movieDto.getTitle());
                     return this.movieRepository.save(movie);
                 })
-                .map(MovieDto::fromEntity);
-    }
-
-    public Mono<MovieDto> updatedAt(String id, MovieDto movieDto) {
-        return this.movieRepository.findById(id)
-                .flatMap(movie -> {
-                    movie.setGenre(movieDto.getGenre());
-                    movie.setReleaseYear(movieDto.getReleaseYear());
-                    movie.setTitle(movieDto.getTitle());
-                    movie.setUpdatedAt(LocalDateTime.now());
-                    return this.movieRepository.save(movie);
-                })
                 .map(MovieDto::fromEntity)
-                .onErrorMap(exception -> new MovieException(exception.getMessage()));
+                .switchIfEmpty(Mono.error(new MovieNotFoundException("The given movie does not exist")));
     }
 }
